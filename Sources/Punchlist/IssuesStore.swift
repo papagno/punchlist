@@ -208,7 +208,8 @@ final class IssuesStore {
         defer { busyItems.remove(item.id) }
         do {
             let state = DemoData.isEnabled ? action.resultingState : try await GH.perform(action, on: item)
-            confirmedStates[item.id] = (state, .now)
+            // A merge that was only queued leaves the PR open; later searches should show it merging.
+            if state == action.resultingState { confirmedStates[item.id] = (state, .now) }
             updateState(of: item.id, to: state)
         } catch {
             actionFailure = (action.failureTitle, error.localizedDescription)
