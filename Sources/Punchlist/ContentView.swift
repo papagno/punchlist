@@ -18,7 +18,10 @@ struct ContentView: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .onChange(of: isCompact, initial: true) { store.isCompact = isCompact }
-        .task(id: store.query) { await store.load() }
+        .task(id: store.query) {
+            await store.load()
+            await store.prefetchOtherTab()
+        }
         .task(id: store.query.includeOrgs) { await store.loadRepositories() }
         .task { await DemoData.applyWindowSize() }
         // Search lives at the trailing edge of the toolbar, per the HIG for split-view apps.
@@ -41,7 +44,7 @@ struct ContentView: View {
                 // which would resize the item's glass capsule.
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     guard !store.isLoading else { return }
-                    Task { await store.load() }
+                    Task { await store.load(force: true) }
                 }
                 .symbolEffect(.rotate.byLayer, options: .repeat(.continuous), isActive: store.isLoading)
                 .help(store.isLoading ? "Loading…" : "Refresh")
@@ -164,9 +167,8 @@ struct Sidebar: View {
     @ViewBuilder
     private func rows(onOpen: ((Issue) -> Void)?) -> some View {
         if store.kind == .issues {
-            NewIssueRow { issue in
-                if let onOpen { onOpen(issue) } else { selection = issue.id }
-            }
+            NewIssueRow()
+            ForEach(store.pendingIssues) { PendingIssueRow(pending: $0) }
         }
         if store.filteredIssues.isEmpty {
             placeholder
@@ -190,7 +192,7 @@ struct Sidebar: View {
 
     @ViewBuilder
     private var placeholder: some View {
-        if store.isLoading {
+        if store.isLoading, !store.hasResults {
             ProgressView("Loading \(store.kind.noun)…")
                 .controlSize(.small)
                 .padding(.vertical, 40)
@@ -200,9 +202,9 @@ struct Sidebar: View {
             } description: {
                 Text(error).textSelection(.enabled)
             } actions: {
-                Button("Try Again") { Task { await store.load() } }
+                Button("Try Again") { Task { await store.load(force: true) } }
             }
-        } else {
+        } else if store.kind != .issues || store.pendingIssues.isEmpty {
             ContentUnavailableView {
                 Label("No \(store.kind.noun)", systemImage: "checkmark.circle")
             } description: {

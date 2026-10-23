@@ -30,7 +30,7 @@ struct PunchlistApp: App {
                     .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
                 }
                 Divider()
-                Button("Refresh") { Task { await store.load() } }
+                Button("Refresh") { Task { await store.load(force: true) } }
                     .keyboardShortcut("r")
                     .disabled(store.isLoading)
                 Button("Back") { withAnimation(.smooth(duration: 0.3)) { store.selection = nil } }

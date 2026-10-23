@@ -11,6 +11,21 @@ final class IssuesStore {
         var includeOrgs = false
     }
 
+    /// A new issue the list shows while `gh` saves it, or after saving failed.
+    struct PendingIssue: Identifiable {
+        let id = UUID()
+        let repo: String
+        let title: String
+        /// Set once GitHub has created it, so a retry only reads it back instead of creating it twice.
+        var url: URL?
+        var errorMessage: String?
+    }
+
+    /// Results younger than this are shown without searching again; Refresh always searches.
+    private static let freshness: TimeInterval = 120
+    /// How long changes made here are laid over search results, which lag behind.
+    private static let searchLag: TimeInterval = 300
+
     var query = Query()
     var selection: Issue.ID?
     var repoFilter: String?
@@ -23,8 +38,13 @@ final class IssuesStore {
     private(set) var lastUpdated: Date?
     /// All of the owners' repos, shared by both tabs so the repo filter means the same thing in each.
     private(set) var allRepositories: [RepositoryInfo] = []
-    /// Last results per query, so switching tabs never shows the other tab's rows.
-    private var cache: [Query: [Issue]] = [:]
+    /// Last results per query and when they arrived, so switching tabs is instant and never
+    /// shows the other tab's rows.
+    private var cache: [Query: (items: [Issue], at: Date)] = [:]
+    /// Searches still running, so a prefetch and a switch to that tab share one `gh search`.
+    private var searches: [Query: Task<[Issue], any Error>] = [:]
+    /// New issues saving in the background, newest first.
+    private(set) var pendingIssues: [PendingIssue] = []
     private(set) var comments: [Issue.ID: [Comment]] = [:]
     /// Items with a close, reopen or merge still running.
     private(set) var busyItems: Set<Issue.ID> = []
@@ -32,8 +52,12 @@ final class IssuesStore {
     var mergeCandidate: Issue?
     private(set) var mergeMethods = MergeMethod.allCases
     private var allowedMergeMethods: [String: [MergeMethod]] = [:]
-    /// States set from the list, laid over search results until the search index catches up.
+    /// States set and issues created from the list, laid over search results until the
+    /// search index catches up.
     private var confirmedStates: [Issue.ID: (state: String, at: Date)] = [:]
+    private var createdIssues: [(issue: Issue, at: Date)] = []
+    /// The signed-in user, from the last search; tells their own repos from their orgs'.
+    private var login: String?
     var actionFailure: (title: String, message: String)?
 
     /// Set by the window: below the compact width the detail is pushed over the list.
@@ -51,6 +75,9 @@ final class IssuesStore {
             if !IssueState.options(for: newValue).contains(query.state) { query.state = .open }
         }
     }
+
+    /// Whether the current tab has been searched at least once; until then it shows a spinner.
+    var hasResults: Bool { cache[query] != nil }
 
     var hasLocalFilters: Bool {
         repoFilter != nil || !labelFilter.isEmpty || !searchText.isEmpty
@@ -130,33 +157,68 @@ final class IssuesStore {
         searchText = ""
     }
 
-    func load() async {
+    /// Shows the last results straight away, then searches again unless they're recent.
+    func load(force: Bool = false) async {
         let query = query
-        issues = cache[query] ?? []
-        isLoading = true
+        let cached = cache[query]
+        issues = cached?.items ?? []
         errorMessage = nil
+        if !force, let cached, cached.at.timeIntervalSinceNow > -Self.freshness {
+            lastUpdated = cached.at
+            isLoading = false
+            selectFirstForDemo()
+            return
+        }
+        isLoading = true
         do {
-            var result: [Issue]
-            if DemoData.isEnabled {
-                result = DemoData.items(kind: query.kind, state: query.state)
-            } else {
-                let owners = try await GH.owners(includeOrgs: query.includeOrgs)
-                result = try await GH.search(query.kind, owners: owners, state: query.state)
-            }
-            applyConfirmedStates(to: &result)
-            cache[query] = result
+            let result = try await search(query)
             // A newer query may have started while gh was running.
             guard !Task.isCancelled, query == self.query else { return }
-            issues = result
+            // The cache, not `result`: a save or state change may have landed since the search.
+            issues = cache[query]?.items ?? result
             lastUpdated = .now
-            // The demo opens on an item so screenshots show the detail too, unless it was given
-            // a window size (for the compact layout, where that would hide the list).
-            if DemoData.isEnabled, DemoData.windowSize == nil, selection == nil { selection = result.first?.id }
+            selectFirstForDemo()
         } catch {
             guard !Task.isCancelled, query == self.query else { return }
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// The demo opens on an item so screenshots show the detail too, unless it was given
+    /// a window size (for the compact layout, where that would hide the list).
+    private func selectFirstForDemo() {
+        if DemoData.isEnabled, DemoData.windowSize == nil, selection == nil { selection = issues.first?.id }
+    }
+
+    /// Searches the other tab in the background, so the first switch to it is instant too.
+    func prefetchOtherTab() async {
+        var other = query
+        other.kind = query.kind == .issues ? .pullRequests : .issues
+        if !IssueState.options(for: other.kind).contains(other.state) { other.state = .open }
+        if let cached = cache[other], cached.at.timeIntervalSinceNow > -Self.freshness { return }
+        _ = try? await search(other)
+    }
+
+    /// Runs the query's search, or joins the one already running, and caches the results.
+    private func search(_ query: Query) async throws -> [Issue] {
+        if let running = searches[query] { return try await running.value }
+        let search = Task {
+            defer { searches[query] = nil }
+            var result: [Issue]
+            if DemoData.isEnabled {
+                result = DemoData.items(kind: query.kind, state: query.state)
+            } else {
+                let owners = try await GH.owners(includeOrgs: query.includeOrgs)
+                login = owners.first
+                result = try await GH.search(query.kind, owners: owners, state: query.state)
+            }
+            applyRecentChanges(to: &result, for: query, fromSearch: true)
+            cache[query] = (result, .now)
+            return result
+        }
+        searches[query] = search
+        return try await search.value
     }
 
     func loadComments(for issue: Issue) async {
@@ -178,16 +240,53 @@ final class IssuesStore {
         allRepositories = repos
     }
 
-    /// Creates the issue and shows it straight away; search results lag behind by a few seconds.
-    func createIssue(repo: String, title: String) async throws -> Issue {
-        let issue = DemoData.isEnabled
-            ? DemoData.createIssue(repo: repo, title: title)
-            : try await GH.createIssue(repo: repo, title: title)
-        if query.kind == .issues, query.state != .closed {
-            issues.insert(issue, at: 0)
-            cache[query] = issues
+    /// Lists the issue straight away and saves it in the background; a failure stays in the
+    /// list with Retry.
+    func submitIssue(repo: String, title: String) {
+        let pending = PendingIssue(repo: repo, title: title)
+        pendingIssues.insert(pending, at: 0)
+        Task { await save(pending.id) }
+    }
+
+    func retry(_ id: PendingIssue.ID) {
+        guard let index = pendingIssues.firstIndex(where: { $0.id == id }),
+              pendingIssues[index].errorMessage != nil else { return }
+        pendingIssues[index].errorMessage = nil
+        Task { await save(id) }
+    }
+
+    func discard(_ id: PendingIssue.ID) {
+        pendingIssues.removeAll { $0.id == id }
+    }
+
+    private func save(_ id: PendingIssue.ID) async {
+        guard let pending = pendingIssues.first(where: { $0.id == id }) else { return }
+        do {
+            let issue: Issue
+            if DemoData.isEnabled {
+                issue = DemoData.createIssue(repo: pending.repo, title: pending.title)
+            } else {
+                let url: URL
+                if let created = pending.url {
+                    url = created
+                } else {
+                    url = try await GH.createIssue(repo: pending.repo, title: pending.title)
+                    if let index = pendingIssues.firstIndex(where: { $0.id == id }) { pendingIssues[index].url = url }
+                }
+                issue = try await GH.issue(at: url, repo: pending.repo)
+            }
+            pendingIssues.removeAll { $0.id == id }
+            createdIssues.append((issue, .now))
+            for query in cache.keys { applyRecentChanges(to: &cache[query]!.items, for: query, fromSearch: false) }
+            // A tab still waiting for its first results gets the issue when they arrive.
+            if let cached = cache[query] { issues = cached.items }
+        } catch {
+            guard let index = pendingIssues.firstIndex(where: { $0.id == id }) else { return }
+            // Discarding and retyping it then would make a duplicate.
+            pendingIssues[index].errorMessage = pendingIssues[index].url == nil
+                ? error.localizedDescription
+                : "Created on GitHub, but couldn't load it: \(error.localizedDescription)"
         }
-        return issue
     }
 
     /// Asks which way to merge, offering only the methods the repo allows.
@@ -210,31 +309,53 @@ final class IssuesStore {
             let state = DemoData.isEnabled ? action.resultingState : try await GH.perform(action, on: item)
             // A merge that was only queued leaves the PR open; later searches should show it merging.
             if state == action.resultingState { confirmedStates[item.id] = (state, .now) }
-            updateState(of: item.id, to: state)
+            // Otherwise a new issue closed straight away would be put back in the open list.
+            createdIssues.removeAll { $0.issue.id == item.id }
+            updateState(of: item, to: state)
         } catch {
             actionFailure = (action.failureTitle, error.localizedDescription)
         }
     }
 
-    /// Search can report the old state for a while after a change; a few minutes covers it
-    /// without hiding a later change made on GitHub for good.
-    private func applyConfirmedStates(to items: inout [Issue]) {
-        confirmedStates = confirmedStates.filter { $0.value.at.timeIntervalSinceNow > -300 }
+    /// Search can miss a new issue or report an old state for a while after a change; a few
+    /// minutes covers it without hiding a later change made on GitHub for good. Only fresh
+    /// search results (`fromSearch`) show that search has caught up with a change, so only
+    /// they let it go; the cached lists already have the changes laid over them.
+    private func applyRecentChanges(to items: inout [Issue], for query: Query, fromSearch: Bool) {
+        createdIssues = createdIssues.filter { $0.at.timeIntervalSinceNow > -Self.searchLag }
+        if query.kind == .issues, query.state != .closed {
+            let found = Set(items.map(\.id))
+            if fromSearch { createdIssues.removeAll { found.contains($0.issue.id) } }
+            // Without orgs, searches only cover the user's own repos.
+            let missing = createdIssues.map(\.issue).filter { created in
+                !found.contains(created.id)
+                    && (query.includeOrgs || login.map { created.repo.hasPrefix("\($0)/") } ?? true)
+            }
+            items.insert(contentsOf: missing.reversed(), at: 0)
+        }
+
+        confirmedStates = confirmedStates.filter { $0.value.at.timeIntervalSinceNow > -Self.searchLag }
         for index in items.indices {
             guard let confirmed = confirmedStates[items[index].id] else { continue }
-            if items[index].state == confirmed.state {
-                confirmedStates[items[index].id] = nil
-            } else {
+            if items[index].state != confirmed.state {
                 items[index].state = confirmed.state
+            } else if fromSearch {
+                confirmedStates[items[index].id] = nil
             }
         }
     }
 
-    private func updateState(of id: Issue.ID, to state: String) {
-        if let index = issues.firstIndex(where: { $0.id == id }) { issues[index].state = state }
-        for (query, items) in cache {
-            guard let index = items.firstIndex(where: { $0.id == id }) else { continue }
-            cache[query]?[index].state = state
+    /// Updates the item wherever it's cached. The tab's other lists, such as Closed after a
+    /// close, may be missing it, so they search again next time instead of counting as fresh.
+    private func updateState(of item: Issue, to state: String) {
+        if let index = issues.firstIndex(where: { $0.id == item.id }) { issues[index].state = state }
+        let kind: ItemKind = item.isPullRequest ? .pullRequests : .issues
+        for (query, cached) in cache where query.kind == kind {
+            if let index = cached.items.firstIndex(where: { $0.id == item.id }) {
+                cache[query]?.items[index].state = state
+            } else {
+                cache[query]?.at = .distantPast
+            }
         }
     }
 }
