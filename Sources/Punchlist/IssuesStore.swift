@@ -56,6 +56,8 @@ final class IssuesStore {
     /// search index catches up.
     private var confirmedStates: [Issue.ID: (state: String, at: Date)] = [:]
     private var createdIssues: [(issue: Issue, at: Date)] = []
+    /// The signed-in user, from the last search; tells their own repos from their orgs'.
+    private var login: String?
     var actionFailure: (title: String, message: String)?
 
     /// Set by the window: below the compact width the detail is pushed over the list.
@@ -172,7 +174,8 @@ final class IssuesStore {
             let result = try await search(query)
             // A newer query may have started while gh was running.
             guard !Task.isCancelled, query == self.query else { return }
-            issues = result
+            // The cache, not `result`: a save or state change may have landed since the search.
+            issues = cache[query]?.items ?? result
             lastUpdated = .now
             selectFirstForDemo()
         } catch {
@@ -207,6 +210,7 @@ final class IssuesStore {
                 result = DemoData.items(kind: query.kind, state: query.state)
             } else {
                 let owners = try await GH.owners(includeOrgs: query.includeOrgs)
+                login = owners.first
                 result = try await GH.search(query.kind, owners: owners, state: query.state)
             }
             applyRecentChanges(to: &result, for: query, fromSearch: true)
@@ -278,7 +282,10 @@ final class IssuesStore {
             if let cached = cache[query] { issues = cached.items }
         } catch {
             guard let index = pendingIssues.firstIndex(where: { $0.id == id }) else { return }
-            pendingIssues[index].errorMessage = error.localizedDescription
+            // Discarding and retyping it then would make a duplicate.
+            pendingIssues[index].errorMessage = pendingIssues[index].url == nil
+                ? error.localizedDescription
+                : "Created on GitHub, but couldn't load it: \(error.localizedDescription)"
         }
     }
 
@@ -304,7 +311,7 @@ final class IssuesStore {
             if state == action.resultingState { confirmedStates[item.id] = (state, .now) }
             // Otherwise a new issue closed straight away would be put back in the open list.
             createdIssues.removeAll { $0.issue.id == item.id }
-            updateState(of: item.id, to: state)
+            updateState(of: item, to: state)
         } catch {
             actionFailure = (action.failureTitle, error.localizedDescription)
         }
@@ -319,7 +326,11 @@ final class IssuesStore {
         if query.kind == .issues, query.state != .closed {
             let found = Set(items.map(\.id))
             if fromSearch { createdIssues.removeAll { found.contains($0.issue.id) } }
-            let missing = createdIssues.map(\.issue).filter { !found.contains($0.id) }
+            // Without orgs, searches only cover the user's own repos.
+            let missing = createdIssues.map(\.issue).filter { created in
+                !found.contains(created.id)
+                    && (query.includeOrgs || login.map { created.repo.hasPrefix("\($0)/") } ?? true)
+            }
             items.insert(contentsOf: missing.reversed(), at: 0)
         }
 
@@ -334,11 +345,17 @@ final class IssuesStore {
         }
     }
 
-    private func updateState(of id: Issue.ID, to state: String) {
-        if let index = issues.firstIndex(where: { $0.id == id }) { issues[index].state = state }
-        for (query, cached) in cache {
-            guard let index = cached.items.firstIndex(where: { $0.id == id }) else { continue }
-            cache[query]?.items[index].state = state
+    /// Updates the item wherever it's cached. The tab's other lists, such as Closed after a
+    /// close, may be missing it, so they search again next time instead of counting as fresh.
+    private func updateState(of item: Issue, to state: String) {
+        if let index = issues.firstIndex(where: { $0.id == item.id }) { issues[index].state = state }
+        let kind: ItemKind = item.isPullRequest ? .pullRequests : .issues
+        for (query, cached) in cache where query.kind == kind {
+            if let index = cached.items.firstIndex(where: { $0.id == item.id }) {
+                cache[query]?.items[index].state = state
+            } else {
+                cache[query]?.at = .distantPast
+            }
         }
     }
 }
