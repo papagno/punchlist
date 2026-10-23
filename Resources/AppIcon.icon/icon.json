@@ -2,19 +2,13 @@
   "fill-specializations" : [
     {
       "value" : {
-        "linear-gradient" : [
-          "srgb:0.25098,0.28235,0.32157,1.00000",
-          "srgb:0.08235,0.09412,0.11373,1.00000"
-        ]
+        "solid" : "srgb:1.00000,0.33333,0.18824,1.00000"
       }
     },
     {
       "appearance" : "dark",
       "value" : {
-        "linear-gradient" : [
-          "srgb:0.16078,0.18039,0.20784,1.00000",
-          "srgb:0.03922,0.04706,0.05882,1.00000"
-        ]
+        "solid" : "srgb:0.56078,0.10588,0.18039,1.00000"
       }
     }
   ],
@@ -23,13 +17,30 @@
       "layers" : [
         {
           "glass" : true,
-          "image-name" : "badge.svg",
-          "name" : "badge"
+          "image-name" : "content.svg",
+          "name" : "content"
+        }
+      ],
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.6
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.1
+      }
+    },
+    {
+      "layers" : [
+        {
+          "glass" : true,
+          "image-name" : "windows.svg",
+          "name" : "windows"
         }
       ],
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0.5
+        "opacity" : 0.6
       },
       "translucency" : {
         "enabled" : true,
@@ -39,18 +50,26 @@
     {
       "layers" : [
         {
-          "glass" : true,
-          "image-name" : "mark.svg",
-          "name" : "mark"
+          "glass" : false,
+          "image-name-specializations" : [
+            {
+              "value" : "background.svg"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "background-dark.svg"
+            }
+          ],
+          "name" : "background"
         }
       ],
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0.5
+        "opacity" : 0
       },
       "translucency" : {
-        "enabled" : true,
-        "value" : 0.4
+        "enabled" : false,
+        "value" : 0
       }
     }
   ],

@@ -51,10 +51,6 @@ The app runs `gh search issues` / `gh search prs` with `--owner` for your accoun
 
 Markdown is rendered with [MarkdownUI](https://github.com/gonzalezreal/swift-markdown-ui).
 
-## Notes
-
-The app icon uses the GitHub mark, which is a GitHub trademark. That's fine for building the app for yourself, but replace the icon if you distribute builds; see GitHub's [logo usage guidelines](https://github.com/logos).
-
 ## License
 
 Copyright © 2026 Francesco Papagno

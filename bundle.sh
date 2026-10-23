@@ -12,9 +12,16 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Punchlist"
 
 # Compiles the Icon Composer file into Assets.car (Liquid Glass) plus an .icns fallback.
-xcrun actool Resources/AppIcon.icon --compile "$APP/Contents/Resources" \
+# actool resolves relative paths against the PWD in its environment, which can be stale,
+# so it gets absolute ones; its output is only shown when it fails.
+ROOT="$(pwd -P)"
+if ! ICON_LOG=$(xcrun actool "$ROOT/Resources/AppIcon.icon" --compile "$ROOT/$APP/Contents/Resources" \
     --platform macosx --minimum-deployment-target 27.0 --app-icon AppIcon \
-    --output-partial-info-plist build/icon-partial.plist >/dev/null
+    --output-partial-info-plist "$ROOT/build/icon-partial.plist" \
+    --output-format human-readable-text 2>&1); then
+    print -r -- "$ICON_LOG" >&2
+    exit 1
+fi
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
