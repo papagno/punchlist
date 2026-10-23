@@ -120,6 +120,26 @@ enum GH {
         )
     }
 
+    /// Runs the action and returns the item's state afterwards, as GitHub reports it: merging
+    /// into a branch with a merge queue only queues the pull request, so it can stay open.
+    static func perform(_ action: ItemAction, on item: Issue) async throws -> String {
+        let command = item.isPullRequest ? "pr" : "issue"
+        let url = item.url.absoluteString
+        switch action {
+        case .closeIssue(let notPlanned):
+            _ = try await run(["issue", "close", url, "--reason", notPlanned ? "not planned" : "completed"])
+        case .closePullRequest:
+            _ = try await run(["pr", "close", url])
+        case .reopen:
+            _ = try await run([command, "reopen", url])
+        case .merge(let method):
+            _ = try await run(["pr", "merge", url, "--\(method.rawValue)"])
+        }
+        struct Viewed: Decodable { let state: String }
+        let data = try await run([command, "view", url, "--json", "state"])
+        return try decoder.decode(Viewed.self, from: data).state.lowercased()
+    }
+
     /// Conversation comments; the issues endpoint serves pull requests too.
     static func comments(for issue: Issue) async throws -> [Comment] {
         let data = try await run(["api", "repos/\(issue.repo)/issues/\(issue.number)/comments",

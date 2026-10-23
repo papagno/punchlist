@@ -47,6 +47,26 @@ struct ContentView: View {
                 .help(store.isLoading ? "Loading…" : "Refresh")
             }
         }
+        .confirmationDialog(
+            "Merge this pull request?",
+            isPresented: Binding(get: { store.mergeCandidate != nil }, set: { if !$0 { store.mergeCandidate = nil } }),
+            presenting: store.mergeCandidate
+        ) { pullRequest in
+            ForEach(MergeMethod.allCases) { method in
+                Button(method.title) { Task { await store.perform(.merge(method), on: pullRequest) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { pullRequest in
+            Text("\(pullRequest.title)\n\(pullRequest.repo) #\(pullRequest.number)")
+        }
+        .alert(
+            store.actionFailure?.title ?? "",
+            isPresented: Binding(get: { store.actionFailure != nil }, set: { if !$0 { store.actionFailure = nil } })
+        ) {
+            Button("OK") {}
+        } message: {
+            Text(store.actionFailure?.message ?? "")
+        }
         // A short title naming what's shown, not the app (HIG: Toolbars > Titles).
         .navigationTitle(store.kind.rawValue)
         .navigationSubtitle(subtitle)
@@ -154,13 +174,17 @@ struct Sidebar: View {
                 .listRowSeparator(.hidden)
         } else if let onOpen {
             ForEach(store.filteredIssues) { issue in
-                IssueRow(issue: issue, showsDisclosure: true)
+                IssueRow(issue: issue, isBusy: store.busyItems.contains(issue.id), showsDisclosure: true)
                     .contentShape(.rect)
                     .onTapGesture { onOpen(issue) }
                     .contextMenu { ItemActions(issue: issue) }
+                    .modifier(StateSwipeActions(issue: issue))
             }
         } else {
-            ForEach(store.filteredIssues) { IssueRow(issue: $0) }
+            ForEach(store.filteredIssues) { issue in
+                IssueRow(issue: issue, isBusy: store.busyItems.contains(issue.id))
+                    .modifier(StateSwipeActions(issue: issue))
+            }
         }
     }
 
@@ -208,12 +232,97 @@ struct ItemActions: View {
             NSPasteboard.general.setString(issue.url.absoluteString, forType: .string)
         }
         Divider()
+        StateActions(issue: issue)
+        Divider()
         Button("Show Only \(issue.repo)") { store.repoFilter = issue.repo }
+    }
+}
+
+/// Close, reopen and merge, for whichever of them the item's state allows.
+struct StateActions: View {
+    @Environment(IssuesStore.self) private var store
+    let issue: Issue
+
+    var body: some View {
+        Group {
+            if issue.isPullRequest {
+                if issue.isOpen {
+                    Button("Merge…") { store.mergeCandidate = issue }
+                        .disabled(!issue.canMerge)
+                    Button("Close Pull Request") { perform(.closePullRequest) }
+                } else if !issue.isMerged {
+                    Button("Reopen Pull Request") { perform(.reopen) }
+                }
+            } else if issue.isOpen {
+                Button("Close as Completed") { perform(.closeIssue(notPlanned: false)) }
+                Button("Close as Not Planned") { perform(.closeIssue(notPlanned: true)) }
+            } else {
+                Button("Reopen Issue") { perform(.reopen) }
+            }
+        }
+        .disabled(store.busyItems.contains(issue.id))
+    }
+
+    private func perform(_ action: ItemAction) {
+        Task { await store.perform(action, on: issue) }
+    }
+}
+
+/// Swipe right to close, reopen or merge; swipe left for the other way to close.
+struct StateSwipeActions: ViewModifier {
+    @Environment(IssuesStore.self) private var store
+    let issue: Issue
+
+    func body(content: Content) -> some View {
+        content
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                if !store.busyItems.contains(issue.id) { leading }
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if !store.busyItems.contains(issue.id) { trailing }
+            }
+    }
+
+    @ViewBuilder
+    private var leading: some View {
+        if issue.isPullRequest {
+            if issue.canMerge {
+                Button("Merge", systemImage: "arrow.triangle.merge") { store.mergeCandidate = issue }
+                    .tint(.purple)
+            } else if !issue.isOpen, !issue.isMerged {
+                Button("Reopen", systemImage: "arrow.uturn.backward") { perform(.reopen) }
+                    .tint(.green)
+            }
+        } else if issue.isOpen {
+            Button("Close", systemImage: "checkmark.circle") { perform(.closeIssue(notPlanned: false)) }
+                .tint(.purple)
+        } else {
+            Button("Reopen", systemImage: "arrow.uturn.backward") { perform(.reopen) }
+                .tint(.green)
+        }
+    }
+
+    @ViewBuilder
+    private var trailing: some View {
+        if issue.isOpen {
+            if issue.isPullRequest {
+                Button("Close", systemImage: "xmark.circle") { perform(.closePullRequest) }
+                    .tint(.red)
+            } else {
+                Button("Not Planned", systemImage: "nosign") { perform(.closeIssue(notPlanned: true)) }
+                    .tint(.gray)
+            }
+        }
+    }
+
+    private func perform(_ action: ItemAction) {
+        Task { await store.perform(action, on: issue) }
     }
 }
 
 struct IssueRow: View {
     let issue: Issue
+    var isBusy = false
     var showsDisclosure = false
 
     var body: some View {
@@ -234,8 +343,11 @@ struct IssueRow: View {
     private var content: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             let badge = issue.stateBadge
+            // Pulses while a close, reopen or merge runs, without changing the row's layout.
             Image(systemName: badge.symbol)
                 .foregroundStyle(badge.color)
+                .symbolEffect(.pulse, options: .repeat(.continuous), isActive: isBusy)
+                .contentTransition(.symbolEffect(.replace))
                 .help(badge.title)
                 .accessibilityLabel(badge.title)
             VStack(alignment: .leading, spacing: 4) {

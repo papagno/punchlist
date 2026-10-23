@@ -26,6 +26,11 @@ final class IssuesStore {
     /// Last results per query, so switching tabs never shows the other tab's rows.
     private var cache: [Query: [Issue]] = [:]
     private(set) var comments: [Issue.ID: [Comment]] = [:]
+    /// Items with a close, reopen or merge still running.
+    private(set) var busyItems: Set<Issue.ID> = []
+    /// Set to ask which way to merge; the window shows the dialog.
+    var mergeCandidate: Issue?
+    var actionFailure: (title: String, message: String)?
 
     /// Set by the window: below the compact width the detail is pushed over the list.
     var isCompact = false
@@ -178,5 +183,26 @@ final class IssuesStore {
             cache[query] = issues
         }
         return issue
+    }
+
+    /// Closes, reopens or merges the item in place. It stays in the list, with its new state,
+    /// until the next refresh, so a slip can be undone from the same row.
+    func perform(_ action: ItemAction, on item: Issue) async {
+        guard busyItems.insert(item.id).inserted else { return }
+        defer { busyItems.remove(item.id) }
+        do {
+            let state = DemoData.isEnabled ? action.resultingState : try await GH.perform(action, on: item)
+            updateState(of: item.id, to: state)
+        } catch {
+            actionFailure = (action.failureTitle, error.localizedDescription)
+        }
+    }
+
+    private func updateState(of id: Issue.ID, to state: String) {
+        if let index = issues.firstIndex(where: { $0.id == id }) { issues[index].state = state }
+        for (query, items) in cache {
+            guard let index = items.firstIndex(where: { $0.id == id }) else { continue }
+            cache[query]?[index].state = state
+        }
     }
 }
