@@ -34,6 +34,8 @@ Punchlist needs macOS 27. Homebrew installs the [GitHub CLI](https://cli.github.
 gh auth login
 ```
 
+Punchlist updates itself: it offers new versions as they come out, or choose **Punchlist > Check for Updates…**. Updates come through [Sparkle](https://sparkle-project.org).
+
 ## Build from source
 
 You'll need Xcode 27 or later (for the Swift 6.4 toolchain and `actool`, which compiles the app icon) and the GitHub CLI, signed in.
@@ -43,7 +45,7 @@ You'll need Xcode 27 or later (for the Swift 6.4 toolchain and `actool`, which c
 open build/Punchlist.app
 ```
 
-`bundle.sh` builds a release binary with Swift Package Manager, compiles the Icon Composer icon in `Resources/AppIcon.icon`, and wraps both into an ad-hoc signed app bundle in `build/`.
+`bundle.sh` builds a release binary with Swift Package Manager, compiles the Icon Composer icon in `Resources/AppIcon.icon`, and wraps both, with Sparkle's framework, into an ad-hoc signed app bundle in `build/`.
 
 ### Demo mode
 
@@ -79,6 +81,13 @@ Markdown is rendered with [MarkdownUI](https://github.com/gonzalezreal/swift-mar
 ```
 
 `release.sh` builds the app with that version, signs it with a Developer ID certificate, has Apple notarize it, and publishes it as a GitHub release. It then updates the cask in [papagno/homebrew-tap](https://github.com/papagno/homebrew-tap). It only releases a clean `main` that matches GitHub, and expects the notarization credentials in a keychain profile (`apps-notary` by default, or set `NOTARY_PROFILE`).
+
+The release also carries an `appcast.xml`, the feed installed copies check for updates. The app's `SUFeedURL` points at the latest release's copy, and each update is signed with an EdDSA key whose public half is `SUPublicEDKey` in `bundle.sh`. The private key lives in the login keychain; keep a backup, since without it installed copies can't verify new updates. To export it, or import it on another Mac (after `swift package resolve`):
+
+```bash
+.build/artifacts/sparkle/Sparkle/bin/generate_keys -x sparkle_private_key.txt
+.build/artifacts/sparkle/Sparkle/bin/generate_keys -f sparkle_private_key.txt
+```
 
 ## License
 
