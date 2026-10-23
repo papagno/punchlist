@@ -46,6 +46,46 @@ enum IssueState: String, CaseIterable, Identifiable {
     }
 }
 
+/// A state change made straight from the list.
+enum ItemAction: Hashable {
+    case closeIssue(notPlanned: Bool)
+    case closePullRequest
+    case reopen
+    case merge(MergeMethod)
+
+    var failureTitle: String {
+        switch self {
+        case .closeIssue: "Couldn't close the issue"
+        case .closePullRequest: "Couldn't close the pull request"
+        case .reopen: "Couldn't reopen"
+        case .merge: "Couldn't merge the pull request"
+        }
+    }
+
+    /// The state GitHub reports once the action has gone through.
+    var resultingState: String {
+        switch self {
+        case .closeIssue, .closePullRequest: "closed"
+        case .reopen: "open"
+        case .merge: "merged"
+        }
+    }
+}
+
+enum MergeMethod: String, CaseIterable, Identifiable {
+    case merge, squash, rebase
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .merge: "Create a Merge Commit"
+        case .squash: "Squash and Merge"
+        case .rebase: "Rebase and Merge"
+        }
+    }
+}
+
 struct RepositoryInfo: Hashable, Decodable {
     let nameWithOwner: String
     let hasIssuesEnabled: Bool
@@ -70,7 +110,8 @@ struct Issue: Identifiable, Hashable, Decodable {
     let number: Int
     let title: String
     let body: String
-    let state: String
+    /// Lowercased: "open", "closed" or, for pull requests, "merged".
+    var state: String
     let url: URL
     let createdAt: Date
     let updatedAt: Date
@@ -91,6 +132,9 @@ struct Issue: Identifiable, Hashable, Decodable {
     var id: URL { url }
     var repo: String { repository.nameWithOwner }
     var isOpen: Bool { state.lowercased() == "open" }
+    var isMerged: Bool { state.lowercased() == "merged" }
+    /// Drafts have to be marked ready for review on GitHub first.
+    var canMerge: Bool { isPullRequest && isOpen && isDraft != true }
 
     var stateBadge: (title: String, symbol: String, color: Color) {
         switch (isPullRequest, state.lowercased()) {

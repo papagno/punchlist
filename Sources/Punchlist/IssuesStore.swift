@@ -26,6 +26,15 @@ final class IssuesStore {
     /// Last results per query, so switching tabs never shows the other tab's rows.
     private var cache: [Query: [Issue]] = [:]
     private(set) var comments: [Issue.ID: [Comment]] = [:]
+    /// Items with a close, reopen or merge still running.
+    private(set) var busyItems: Set<Issue.ID> = []
+    /// Set to ask which way to merge; the window shows the dialog with `mergeMethods`.
+    var mergeCandidate: Issue?
+    private(set) var mergeMethods = MergeMethod.allCases
+    private var allowedMergeMethods: [String: [MergeMethod]] = [:]
+    /// States set from the list, laid over search results until the search index catches up.
+    private var confirmedStates: [Issue.ID: (state: String, at: Date)] = [:]
+    var actionFailure: (title: String, message: String)?
 
     /// Set by the window: below the compact width the detail is pushed over the list.
     var isCompact = false
@@ -127,13 +136,14 @@ final class IssuesStore {
         isLoading = true
         errorMessage = nil
         do {
-            let result: [Issue]
+            var result: [Issue]
             if DemoData.isEnabled {
                 result = DemoData.items(kind: query.kind, state: query.state)
             } else {
                 let owners = try await GH.owners(includeOrgs: query.includeOrgs)
                 result = try await GH.search(query.kind, owners: owners, state: query.state)
             }
+            applyConfirmedStates(to: &result)
             cache[query] = result
             // A newer query may have started while gh was running.
             guard !Task.isCancelled, query == self.query else { return }
@@ -178,5 +188,53 @@ final class IssuesStore {
             cache[query] = issues
         }
         return issue
+    }
+
+    /// Asks which way to merge, offering only the methods the repo allows.
+    func requestMerge(_ pullRequest: Issue) async {
+        if allowedMergeMethods[pullRequest.repo] == nil, !DemoData.isEnabled {
+            guard busyItems.insert(pullRequest.id).inserted else { return }
+            allowedMergeMethods[pullRequest.repo] = try? await GH.mergeMethods(repo: pullRequest.repo)
+            busyItems.remove(pullRequest.id)
+        }
+        mergeMethods = allowedMergeMethods[pullRequest.repo] ?? MergeMethod.allCases
+        mergeCandidate = pullRequest
+    }
+
+    /// Closes, reopens or merges the item in place. It stays in the list, with its new state,
+    /// until the next refresh, so a slip can be undone from the same row.
+    func perform(_ action: ItemAction, on item: Issue) async {
+        guard busyItems.insert(item.id).inserted else { return }
+        defer { busyItems.remove(item.id) }
+        do {
+            let state = DemoData.isEnabled ? action.resultingState : try await GH.perform(action, on: item)
+            // A merge that was only queued leaves the PR open; later searches should show it merging.
+            if state == action.resultingState { confirmedStates[item.id] = (state, .now) }
+            updateState(of: item.id, to: state)
+        } catch {
+            actionFailure = (action.failureTitle, error.localizedDescription)
+        }
+    }
+
+    /// Search can report the old state for a while after a change; a few minutes covers it
+    /// without hiding a later change made on GitHub for good.
+    private func applyConfirmedStates(to items: inout [Issue]) {
+        confirmedStates = confirmedStates.filter { $0.value.at.timeIntervalSinceNow > -300 }
+        for index in items.indices {
+            guard let confirmed = confirmedStates[items[index].id] else { continue }
+            if items[index].state == confirmed.state {
+                confirmedStates[items[index].id] = nil
+            } else {
+                items[index].state = confirmed.state
+            }
+        }
+    }
+
+    private func updateState(of id: Issue.ID, to state: String) {
+        if let index = issues.firstIndex(where: { $0.id == id }) { issues[index].state = state }
+        for (query, items) in cache {
+            guard let index = items.firstIndex(where: { $0.id == id }) else { continue }
+            cache[query]?[index].state = state
+        }
     }
 }

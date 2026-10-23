@@ -120,6 +120,47 @@ enum GH {
         )
     }
 
+    /// Runs the action and returns the item's state afterwards, as GitHub reports it: merging
+    /// into a branch with a merge queue only queues the pull request, so it can stay open.
+    static func perform(_ action: ItemAction, on item: Issue) async throws -> String {
+        let command = item.isPullRequest ? "pr" : "issue"
+        let url = item.url.absoluteString
+        switch action {
+        case .closeIssue(let notPlanned):
+            _ = try await run(["issue", "close", url, "--reason", notPlanned ? "not planned" : "completed"])
+        case .closePullRequest:
+            _ = try await run(["pr", "close", url])
+        case .reopen:
+            _ = try await run([command, "reopen", url])
+        case .merge(let method):
+            _ = try await run(["pr", "merge", url, "--\(method.rawValue)"])
+        }
+        // The change has gone through either way, so a failed read-back isn't reported.
+        struct Viewed: Decodable { let state: String }
+        guard let data = try? await run([command, "view", url, "--json", "state"]),
+              let viewed = try? decoder.decode(Viewed.self, from: data) else { return action.resultingState }
+        return viewed.state.lowercased()
+    }
+
+    /// The merge methods the repo allows; GitHub refuses the others.
+    static func mergeMethods(repo: String) async throws -> [MergeMethod] {
+        struct Settings: Decodable {
+            let mergeCommitAllowed: Bool
+            let squashMergeAllowed: Bool
+            let rebaseMergeAllowed: Bool
+        }
+        let data = try await run(["repo", "view", repo, "--json",
+                                  "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed"])
+        let settings = try decoder.decode(Settings.self, from: data)
+        return MergeMethod.allCases.filter { method in
+            switch method {
+            case .merge: settings.mergeCommitAllowed
+            case .squash: settings.squashMergeAllowed
+            case .rebase: settings.rebaseMergeAllowed
+            }
+        }
+    }
+
     /// Conversation comments; the issues endpoint serves pull requests too.
     static func comments(for issue: Issue) async throws -> [Comment] {
         let data = try await run(["api", "repos/\(issue.repo)/issues/\(issue.number)/comments",
