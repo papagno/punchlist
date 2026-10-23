@@ -164,6 +164,7 @@ final class IssuesStore {
         if !force, let cached, cached.at.timeIntervalSinceNow > -Self.freshness {
             lastUpdated = cached.at
             isLoading = false
+            selectFirstForDemo()
             return
         }
         isLoading = true
@@ -173,14 +174,18 @@ final class IssuesStore {
             guard !Task.isCancelled, query == self.query else { return }
             issues = result
             lastUpdated = .now
-            // The demo opens on an item so screenshots show the detail too, unless it was given
-            // a window size (for the compact layout, where that would hide the list).
-            if DemoData.isEnabled, DemoData.windowSize == nil, selection == nil { selection = result.first?.id }
+            selectFirstForDemo()
         } catch {
             guard !Task.isCancelled, query == self.query else { return }
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// The demo opens on an item so screenshots show the detail too, unless it was given
+    /// a window size (for the compact layout, where that would hide the list).
+    private func selectFirstForDemo() {
+        if DemoData.isEnabled, DemoData.windowSize == nil, selection == nil { selection = issues.first?.id }
     }
 
     /// Searches the other tab in the background, so the first switch to it is instant too.
@@ -204,7 +209,7 @@ final class IssuesStore {
                 let owners = try await GH.owners(includeOrgs: query.includeOrgs)
                 result = try await GH.search(query.kind, owners: owners, state: query.state)
             }
-            applyRecentChanges(to: &result, for: query)
+            applyRecentChanges(to: &result, for: query, fromSearch: true)
             cache[query] = (result, .now)
             return result
         }
@@ -268,8 +273,9 @@ final class IssuesStore {
             }
             pendingIssues.removeAll { $0.id == id }
             createdIssues.append((issue, .now))
-            for query in cache.keys { applyRecentChanges(to: &cache[query]!.items, for: query) }
-            applyRecentChanges(to: &issues, for: query)
+            for query in cache.keys { applyRecentChanges(to: &cache[query]!.items, for: query, fromSearch: false) }
+            // A tab still waiting for its first results gets the issue when they arrive.
+            if let cached = cache[query] { issues = cached.items }
         } catch {
             guard let index = pendingIssues.firstIndex(where: { $0.id == id }) else { return }
             pendingIssues[index].errorMessage = error.localizedDescription
@@ -305,22 +311,25 @@ final class IssuesStore {
     }
 
     /// Search can miss a new issue or report an old state for a while after a change; a few
-    /// minutes covers it without hiding a later change made on GitHub for good.
-    private func applyRecentChanges(to items: inout [Issue], for query: Query) {
+    /// minutes covers it without hiding a later change made on GitHub for good. Only fresh
+    /// search results (`fromSearch`) show that search has caught up with a change, so only
+    /// they let it go; the cached lists already have the changes laid over them.
+    private func applyRecentChanges(to items: inout [Issue], for query: Query, fromSearch: Bool) {
         createdIssues = createdIssues.filter { $0.at.timeIntervalSinceNow > -Self.searchLag }
         if query.kind == .issues, query.state != .closed {
             let found = Set(items.map(\.id))
-            createdIssues.removeAll { found.contains($0.issue.id) }
-            items.insert(contentsOf: createdIssues.map(\.issue).reversed(), at: 0)
+            if fromSearch { createdIssues.removeAll { found.contains($0.issue.id) } }
+            let missing = createdIssues.map(\.issue).filter { !found.contains($0.id) }
+            items.insert(contentsOf: missing.reversed(), at: 0)
         }
 
         confirmedStates = confirmedStates.filter { $0.value.at.timeIntervalSinceNow > -Self.searchLag }
         for index in items.indices {
             guard let confirmed = confirmedStates[items[index].id] else { continue }
-            if items[index].state == confirmed.state {
-                confirmedStates[items[index].id] = nil
-            } else {
+            if items[index].state != confirmed.state {
                 items[index].state = confirmed.state
+            } else if fromSearch {
+                confirmedStates[items[index].id] = nil
             }
         }
     }

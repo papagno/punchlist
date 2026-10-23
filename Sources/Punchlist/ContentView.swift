@@ -204,7 +204,7 @@ struct Sidebar: View {
             } actions: {
                 Button("Try Again") { Task { await store.load(force: true) } }
             }
-        } else {
+        } else if store.kind != .issues || store.pendingIssues.isEmpty {
             ContentUnavailableView {
                 Label("No \(store.kind.noun)", systemImage: "checkmark.circle")
             } description: {
