@@ -22,18 +22,21 @@ Punchlist is a small macOS companion for when you're coding: it shows the open i
   <img alt="The narrow layout: the list on its own, and an issue's detail slid in over it with a back button" src="docs/screenshots/compact-light.png" width="600">
 </picture>
 
-## Requirements
+## Install
 
-- macOS 27 or later
-- Xcode 27 or later (for the Swift 6.4 toolchain and `actool`, which compiles the app icon)
-- The GitHub CLI, signed in:
+```bash
+brew install --cask papagno/tap/punchlist
+```
 
-  ```bash
-  brew install gh
-  gh auth login
-  ```
+Punchlist needs macOS 27. Homebrew installs the [GitHub CLI](https://cli.github.com) with it; sign in to GitHub once:
 
-## Build and run
+```bash
+gh auth login
+```
+
+## Build from source
+
+You'll need Xcode 27 or later (for the Swift 6.4 toolchain and `actool`, which compiles the app icon) and the GitHub CLI, signed in.
 
 ```bash
 ./bundle.sh
@@ -68,6 +71,14 @@ Double-click an item to open it in your browser; right-click for more actions.
 The app runs `gh search issues` / `gh search prs` with `--owner` for your account (and your organizations, if included), so results are capped at GitHub search's 1,000 items per query and archived repositories are left out. Comments come from `gh api`, and new issues are created with `gh issue create`.
 
 Markdown is rendered with [MarkdownUI](https://github.com/gonzalezreal/swift-markdown-ui).
+
+## Releasing
+
+```bash
+./release.sh 0.2.0
+```
+
+`release.sh` builds the app with that version, signs it with a Developer ID certificate, has Apple notarize it, and publishes it as a GitHub release. It then updates the cask in [papagno/homebrew-tap](https://github.com/papagno/homebrew-tap). It only releases a clean `main` that matches GitHub, and expects the notarization credentials in a keychain profile (`apps-notary` by default, or set `NOTARY_PROFILE`).
 
 ## License
 
