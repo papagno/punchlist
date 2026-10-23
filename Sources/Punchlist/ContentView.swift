@@ -52,7 +52,7 @@ struct ContentView: View {
             isPresented: Binding(get: { store.mergeCandidate != nil }, set: { if !$0 { store.mergeCandidate = nil } }),
             presenting: store.mergeCandidate
         ) { pullRequest in
-            ForEach(MergeMethod.allCases) { method in
+            ForEach(store.mergeMethods) { method in
                 Button(method.title) { Task { await store.perform(.merge(method), on: pullRequest) } }
             }
             Button("Cancel", role: .cancel) {}
@@ -232,8 +232,11 @@ struct ItemActions: View {
             NSPasteboard.general.setString(issue.url.absoluteString, forType: .string)
         }
         Divider()
-        StateActions(issue: issue)
-        Divider()
+        // Merged pull requests can't change state.
+        if !issue.isMerged {
+            StateActions(issue: issue)
+            Divider()
+        }
         Button("Show Only \(issue.repo)") { store.repoFilter = issue.repo }
     }
 }
@@ -247,7 +250,7 @@ struct StateActions: View {
         Group {
             if issue.isPullRequest {
                 if issue.isOpen {
-                    Button("Merge…") { store.mergeCandidate = issue }
+                    Button("Merge…") { Task { await store.requestMerge(issue) } }
                         .disabled(!issue.canMerge)
                     Button("Close Pull Request") { perform(.closePullRequest) }
                 } else if !issue.isMerged {
@@ -287,7 +290,7 @@ struct StateSwipeActions: ViewModifier {
     private var leading: some View {
         if issue.isPullRequest {
             if issue.canMerge {
-                Button("Merge", systemImage: "arrow.triangle.merge") { store.mergeCandidate = issue }
+                Button("Merge", systemImage: "arrow.triangle.merge") { Task { await store.requestMerge(issue) } }
                     .tint(.purple)
             } else if !issue.isOpen, !issue.isMerged {
                 Button("Reopen", systemImage: "arrow.uturn.backward") { perform(.reopen) }

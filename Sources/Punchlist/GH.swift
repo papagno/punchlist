@@ -135,9 +135,30 @@ enum GH {
         case .merge(let method):
             _ = try await run(["pr", "merge", url, "--\(method.rawValue)"])
         }
+        // The change has gone through either way, so a failed read-back isn't reported.
         struct Viewed: Decodable { let state: String }
-        let data = try await run([command, "view", url, "--json", "state"])
-        return try decoder.decode(Viewed.self, from: data).state.lowercased()
+        guard let data = try? await run([command, "view", url, "--json", "state"]),
+              let viewed = try? decoder.decode(Viewed.self, from: data) else { return action.resultingState }
+        return viewed.state.lowercased()
+    }
+
+    /// The merge methods the repo allows; GitHub refuses the others.
+    static func mergeMethods(repo: String) async throws -> [MergeMethod] {
+        struct Settings: Decodable {
+            let mergeCommitAllowed: Bool
+            let squashMergeAllowed: Bool
+            let rebaseMergeAllowed: Bool
+        }
+        let data = try await run(["repo", "view", repo, "--json",
+                                  "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed"])
+        let settings = try decoder.decode(Settings.self, from: data)
+        return MergeMethod.allCases.filter { method in
+            switch method {
+            case .merge: settings.mergeCommitAllowed
+            case .squash: settings.squashMergeAllowed
+            case .rebase: settings.rebaseMergeAllowed
+            }
+        }
     }
 
     /// Conversation comments; the issues endpoint serves pull requests too.
