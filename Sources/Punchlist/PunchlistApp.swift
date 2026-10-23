@@ -1,11 +1,11 @@
 import SwiftUI
 
 @main
-struct GitHubIssuesApp: App {
+struct PunchlistApp: App {
     @State private var store = IssuesStore()
 
     var body: some Scene {
-        Window("GitHub Issues", id: "main") {
+        Window("Punchlist", id: "main") {
             ContentView()
                 .environment(store)
         }

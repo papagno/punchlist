@@ -1,6 +1,8 @@
-# GitHub Issues
+# Punchlist
 
-A lightweight macOS client for the issues and pull requests across your GitHub repositories. It has no GitHub code of its own: everything goes through the [`gh` CLI](https://cli.github.com) you already have installed and signed in, so it never sees or stores a token.
+*Your repos' to-dos, beside your code.*
+
+Punchlist is a small macOS companion for when you're coding: it shows the open issues across your GitHub repositories as one list you can keep next to your editor, lets you jot down a new one in a second, and gives you a quick look at pull requests when you need it. It has no GitHub code of its own: everything goes through the [`gh` CLI](https://cli.github.com) you already have installed and signed in, so it never sees or stores a token.
 
 ## Features
 
@@ -8,12 +10,12 @@ A lightweight macOS client for the issues and pull requests across your GitHub r
 - Filters for repository, status (open, closed, merged, all) and labels, plus search by title, repository, number or author.
 - Issue and pull request detail with GitHub-style Markdown and the conversation's comments.
 - Create an issue from the first row of the list: type a title, pick the repository, press Return.
-- A native macOS 26+ layout: a resizable glass sidebar beside the detail. Below 640 points wide, the window switches to a single list, and the detail slides in over it.
+- A native macOS 27 layout: a resizable glass sidebar beside the detail. Below 640 points wide, the window switches to a single list, and the detail slides in over it.
 
 ## Requirements
 
-- macOS 26 or later
-- Xcode 26 or later (for the Swift 6.2 toolchain and `actool`, which compiles the app icon)
+- macOS 27 or later
+- Xcode 27 or later (for the Swift 6.4 toolchain and `actool`, which compiles the app icon)
 - The GitHub CLI, signed in:
 
   ```bash
@@ -25,7 +27,7 @@ A lightweight macOS client for the issues and pull requests across your GitHub r
 
 ```bash
 ./bundle.sh
-open "build/GitHub Issues.app"
+open build/Punchlist.app
 ```
 
 `bundle.sh` builds a release binary with Swift Package Manager, compiles the Icon Composer icon in `Resources/AppIcon.icon`, and wraps both into an ad-hoc signed app bundle in `build/`.

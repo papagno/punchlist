@@ -1,16 +1,15 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.4
 import PackageDescription
 
 let package = Package(
-    name: "GitHubIssues",
-    // macOS 26 is the Liquid Glass baseline (safeAreaBar, glass sidebars, scroll edge effects).
-    platforms: [.macOS(.v26)],
+    name: "Punchlist",
+    platforms: [.macOS(.v27)],
     dependencies: [
         .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1")
     ],
     targets: [
         .executableTarget(
-            name: "GitHubIssues",
+            name: "Punchlist",
             dependencies: [.product(name: "MarkdownUI", package: "swift-markdown-ui")]
         )
     ]
