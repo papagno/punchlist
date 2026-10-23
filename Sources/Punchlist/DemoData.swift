@@ -47,9 +47,14 @@ enum DemoData {
         }
     }
 
-    static func createIssue(repo: String, title: String) -> Issue {
-        let number = (issues.filter { $0.repo == repo }.map(\.number).max() ?? 0) + 1
-        return item(repo, number, title, labels: [], comments: 0, hoursAgo: 0)
+    /// Numbers handed out so far, so issues created in a row don't share a URL.
+    @MainActor private static var createdNumbers: [String: Int] = [:]
+
+    @MainActor static func createIssue(repo: String, title: String) -> Issue {
+        let number = (createdNumbers[repo] ?? issues.filter { $0.repo == repo }.map(\.number).max() ?? 0) + 1
+        createdNumbers[repo] = number
+        // `item` takes the name without the owner.
+        return item(String(repo.split(separator: "/").last ?? ""), number, title, labels: [], comments: 0, hoursAgo: 0)
     }
 
     // MARK: - Content

@@ -90,12 +90,16 @@ enum GH {
         return repos.sorted { $0.nameWithOwner.localizedStandardCompare($1.nameWithOwner) == .orderedAscending }
     }
 
-    static func createIssue(repo: String, title: String) async throws -> Issue {
+    /// Creates the issue and returns its URL; `issue(at:repo:)` reads it back.
+    static func createIssue(repo: String, title: String) async throws -> URL {
         let created = try await lines(["issue", "create", "--repo", repo, "--title", title, "--body", ""])
-        guard let url = created.last(where: { $0.hasPrefix("https://") }) else {
+        guard let line = created.last(where: { $0.hasPrefix("https://") }), let url = URL(string: line) else {
             throw Failure(message: "gh didn't return the new issue's URL.")
         }
+        return url
+    }
 
+    static func issue(at url: URL, repo: String) async throws -> Issue {
         // `gh issue view` uses different field names from `gh search`, so map it by hand.
         struct Viewed: Decodable {
             let number: Int
@@ -109,7 +113,7 @@ enum GH {
             let assignees: [Issue.User]
             let labels: [Issue.IssueLabel]
         }
-        let data = try await run(["issue", "view", url, "--json",
+        let data = try await run(["issue", "view", url.absoluteString, "--json",
                                   "number,title,body,state,url,createdAt,updatedAt,author,assignees,labels"])
         let viewed = try decoder.decode(Viewed.self, from: data)
         return Issue(
