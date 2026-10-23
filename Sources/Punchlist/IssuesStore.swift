@@ -127,13 +127,21 @@ final class IssuesStore {
         isLoading = true
         errorMessage = nil
         do {
-            let owners = try await GH.owners(includeOrgs: query.includeOrgs)
-            let result = try await GH.search(query.kind, owners: owners, state: query.state)
+            let result: [Issue]
+            if DemoData.isEnabled {
+                result = DemoData.items(kind: query.kind, state: query.state)
+            } else {
+                let owners = try await GH.owners(includeOrgs: query.includeOrgs)
+                result = try await GH.search(query.kind, owners: owners, state: query.state)
+            }
             cache[query] = result
             // A newer query may have started while gh was running.
             guard !Task.isCancelled, query == self.query else { return }
             issues = result
             lastUpdated = .now
+            // The demo opens on an item so screenshots show the detail too, unless it was given
+            // a window size (for the compact layout, where that would hide the list).
+            if DemoData.isEnabled, DemoData.windowSize == nil, selection == nil { selection = result.first?.id }
         } catch {
             guard !Task.isCancelled, query == self.query else { return }
             errorMessage = error.localizedDescription
@@ -142,11 +150,19 @@ final class IssuesStore {
     }
 
     func loadComments(for issue: Issue) async {
+        if DemoData.isEnabled {
+            comments[issue.id] = DemoData.comments(for: issue)
+            return
+        }
         guard let loaded = try? await GH.comments(for: issue) else { return }
         comments[issue.id] = loaded
     }
 
     func loadRepositories() async {
+        if DemoData.isEnabled {
+            allRepositories = DemoData.repositories
+            return
+        }
         guard let owners = try? await GH.owners(includeOrgs: query.includeOrgs),
               let repos = try? await GH.repositories(owners: owners) else { return }
         allRepositories = repos
@@ -154,7 +170,9 @@ final class IssuesStore {
 
     /// Creates the issue and shows it straight away; search results lag behind by a few seconds.
     func createIssue(repo: String, title: String) async throws -> Issue {
-        let issue = try await GH.createIssue(repo: repo, title: title)
+        let issue = DemoData.isEnabled
+            ? DemoData.createIssue(repo: repo, title: title)
+            : try await GH.createIssue(repo: repo, title: title)
         if query.kind == .issues, query.state != .closed {
             issues.insert(issue, at: 0)
             cache[query] = issues

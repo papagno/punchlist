@@ -20,6 +20,7 @@ struct ContentView: View {
         .onChange(of: isCompact, initial: true) { store.isCompact = isCompact }
         .task(id: store.query) { await store.load() }
         .task(id: store.query.includeOrgs) { await store.loadRepositories() }
+        .task { await DemoData.applyWindowSize() }
         // Search lives at the trailing edge of the toolbar, per the HIG for split-view apps.
         .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search \(store.kind.noun)")
         .searchFocused($isSearchFocused)
