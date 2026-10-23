@@ -1,8 +1,13 @@
+import Sparkle
 import SwiftUI
 
 @main
 struct PunchlistApp: App {
     @State private var store = IssuesStore()
+    // Demo mode is for screenshots, which an update prompt would cover.
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: !DemoData.isEnabled, updaterDelegate: nil, userDriverDelegate: nil
+    )
 
     var body: some Scene {
         Window("Punchlist", id: "main") {
@@ -12,6 +17,9 @@ struct PunchlistApp: App {
         .defaultSize(width: 1100, height: 700)
         .commands {
             SidebarCommands()
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesButton(updater: updaterController.updater)
+            }
             // Every toolbar action is also in the menu bar (HIG: Toolbars > macOS).
             CommandGroup(replacing: .newItem) {
                 Button("New Issue") { store.requestNewIssue() }

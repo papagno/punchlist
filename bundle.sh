@@ -14,12 +14,14 @@ BUILD_NUMBER="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 
 swift build -c release
-BIN="$(swift build -c release --show-bin-path)/Punchlist"
+BIN_DIR="$(swift build -c release --show-bin-path)"
 APP="build/Punchlist.app"
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/Punchlist"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
+cp "$BIN_DIR/Punchlist" "$APP/Contents/MacOS/Punchlist"
+# ditto keeps the framework's symlinks, which codesign requires.
+ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 
 # Compiles the Icon Composer file into Assets.car (Liquid Glass) plus an .icns fallback.
 # actool resolves relative paths against the PWD in its environment, which can be stale,
@@ -51,13 +53,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHumanReadableCopyright</key><string>© 2026 Francesco Papagno. GPL-3.0-or-later.</string>
     <key>LSMinimumSystemVersion</key><string>27.0</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>SUFeedURL</key><string>https://github.com/papagno/punchlist/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key><string>lRKgp01JFmEEcfpbuSnPS8ARl4BVn+VB8H1k1UAM018=</string>
 </dict>
 </plist>
 PLIST
 
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
-    codesign --force --sign - "$APP"
+    SIGN=(codesign --force --sign -)
 else
-    codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+    SIGN=(codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY")
 fi
+# Sparkle's helpers are signed inside out, then the framework, then the app
+# (https://sparkle-project.org/documentation/sandboxing/#code-signing).
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+"${SIGN[@]}" "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
+"${SIGN[@]}" --preserve-metadata=entitlements "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
+"${SIGN[@]}" "$SPARKLE/Versions/B/Autoupdate"
+"${SIGN[@]}" "$SPARKLE/Versions/B/Updater.app"
+"${SIGN[@]}" "$SPARKLE"
+"${SIGN[@]}" "$APP"
 echo "Built $APP ($VERSION, build $BUILD_NUMBER)"
