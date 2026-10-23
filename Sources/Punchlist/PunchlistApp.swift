@@ -4,8 +4,9 @@ import SwiftUI
 @main
 struct PunchlistApp: App {
     @State private var store = IssuesStore()
+    // Demo mode is for screenshots, which an update prompt would cover.
     private let updaterController = SPUStandardUpdaterController(
-        startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
+        startingUpdater: !DemoData.isEnabled, updaterDelegate: nil, userDriverDelegate: nil
     )
 
     var body: some Scene {

@@ -34,7 +34,7 @@ Punchlist needs macOS 27. Homebrew installs the [GitHub CLI](https://cli.github.
 gh auth login
 ```
 
-Punchlist updates itself: it offers new versions as they come out, or choose **Punchlist > Check for Updates…**. Updates come through [Sparkle](https://sparkle-project.org).
+Punchlist updates itself: once you let it check automatically (it asks on the second launch), it offers new versions as they come out, or choose **Punchlist > Check for Updates…**. Updates come through [Sparkle](https://sparkle-project.org).
 
 ## Build from source
 
