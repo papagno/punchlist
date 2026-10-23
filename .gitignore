@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Xcode, if the package is opened there
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# bundle.sh output (the .app and the compiled icon)
+build/
+
+# Local editor and agent settings
+.vscode/
+.idea/
+.claude/settings.local.json
