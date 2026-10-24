@@ -27,7 +27,9 @@ struct FilterBar: View {
         HStack(spacing: 6) {
             repoMenu
             statusMenu.fixedSize()
-            labelMenu.fixedSize()
+            // "Labels" keeps its width; a selected label's name truncates rather than squeezing
+            // the repo menu away.
+            labelMenu.fixedSize(horizontal: store.labelFilter.isEmpty, vertical: false)
             Spacer(minLength: 0)
             moreMenu.fixedSize()
         }
@@ -99,6 +101,8 @@ struct FilterBar: View {
             }
         } label: {
             Text(labelMenuTitle)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .help("Filter by label")
     }
@@ -145,7 +149,7 @@ private struct KindSwitch: View {
             ForEach(ItemKind.allCases) { kind in
                 let isSelected = store.kind == kind
                 Button {
-                    withAnimation(.snappy(duration: 0.25)) { store.kind = kind }
+                    store.kind = kind
                 } label: {
                     Image(systemName: kind.symbol)
                         .frame(width: 32)
@@ -167,6 +171,8 @@ private struct KindSwitch: View {
             }
         }
         .padding(3)
+        // Only the capsule slides; the list switches instantly, also from the menu bar.
+        .animation(.snappy(duration: 0.25), value: store.kind)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Show")
     }

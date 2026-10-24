@@ -28,6 +28,9 @@ struct NewIssueRow: View {
                 }
                 .padding(.horizontal, Self.fieldInset)
                 .frame(height: FilterBar.height)
+                // Clicks on the capsule around the text focus the field too.
+                .contentShape(.capsule)
+                .onTapGesture { isFocused = true }
                 .glassEffect(.regular.interactive(), in: .capsule)
                 .overlay {
                     // Plain fields draw no focus ring, so the capsule shows focus itself.
@@ -71,6 +74,7 @@ struct NewIssueRow: View {
                 Image(systemName: "chevron.down")
                     .imageScale(.small)
                     .fontWeight(.semibold)
+                    .accessibilityHidden(true)
             }
             .font(.callout)
             .contentShape(.rect)
