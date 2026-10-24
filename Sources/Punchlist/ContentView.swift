@@ -394,18 +394,22 @@ struct IssueRow: View {
 struct LabelChips: View {
     let labels: [Issue.IssueLabel]
     @Environment(\.colorScheme) private var colorScheme
+    /// Increased on a selected row, where a shade of the label's hue can vanish into the
+    /// accent color; the chips turn white there, like the row's other text.
+    @Environment(\.backgroundProminence) private var backgroundProminence
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(labels) { label in
                 // The border uses the text's shade, so pale labels still get a visible edge on white.
-                let textColor = Color.labelText(hex: label.color, in: colorScheme)
+                let isOnSelection = backgroundProminence == .increased
+                let textColor = isOnSelection ? .white : Color.labelText(hex: label.color, in: colorScheme)
                 Text(label.name)
                     .font(.caption2.weight(.medium))
                     .lineLimit(1)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1)
-                    .background(Color(hex: label.color).opacity(0.1), in: .capsule)
+                    .background((isOnSelection ? .white : Color(hex: label.color)).opacity(0.1), in: .capsule)
                     .overlay { Capsule().strokeBorder(textColor.opacity(0.3), lineWidth: 1) }
                     .foregroundStyle(textColor)
             }
