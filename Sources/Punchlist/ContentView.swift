@@ -126,7 +126,7 @@ struct ContentView: View {
     }
 }
 
-/// The list column: the issues / pull requests switch and the filters on top, then the rows.
+/// The list column: the issues / pull requests switch and the filters in a glass bar on top, then the rows.
 struct Sidebar: View {
     @Environment(IssuesStore.self) private var store
     @Binding var selection: Issue.ID?
@@ -136,9 +136,9 @@ struct Sidebar: View {
     var body: some View {
         Group {
             if let onOpen {
-                List { rows(onOpen: onOpen) }
+                List { rows(onOpen: onOpen).listRowSeparator(.hidden) }
             } else {
-                List(selection: $selection) { rows(onOpen: nil) }
+                List(selection: $selection) { rows(onOpen: nil).listRowSeparator(.hidden) }
                     .contextMenu(forSelectionType: Issue.ID.self) { ids in
                         if let issue = store.issue(id: ids.first) { ItemActions(issue: issue) }
                     } primaryAction: { ids in
@@ -151,17 +151,12 @@ struct Sidebar: View {
     }
 
     private var header: some View {
-        @Bindable var store = store
-        return VStack(spacing: 8) {
-            Picker("Show", selection: $store.kind) {
-                ForEach(ItemKind.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            FilterBar()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        FilterBar()
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            // The compact layout's list starts its rows 9pt lower than the sidebar's; this keeps
+            // the gap under the bar the same as the margin beside it in both.
+            .padding(.bottom, onOpen == nil ? 4 : -5)
     }
 
     @ViewBuilder
@@ -173,10 +168,9 @@ struct Sidebar: View {
         if store.filteredIssues.isEmpty {
             placeholder
                 .frame(maxWidth: .infinity)
-                .listRowSeparator(.hidden)
         } else if let onOpen {
             ForEach(store.filteredIssues) { issue in
-                IssueRow(issue: issue, isBusy: store.busyItems.contains(issue.id), showsDisclosure: true)
+                IssueRow(issue: issue, isBusy: store.busyItems.contains(issue.id), showsRepo: store.repoFilter == nil, showsDisclosure: true)
                     .contentShape(.rect)
                     .onTapGesture { onOpen(issue) }
                     .contextMenu { ItemActions(issue: issue) }
@@ -184,7 +178,7 @@ struct Sidebar: View {
             }
         } else {
             ForEach(store.filteredIssues) { issue in
-                IssueRow(issue: issue, isBusy: store.busyItems.contains(issue.id))
+                IssueRow(issue: issue, isBusy: store.busyItems.contains(issue.id), showsRepo: store.repoFilter == nil)
                     .modifier(StateSwipeActions(issue: issue))
             }
         }
@@ -326,8 +320,15 @@ struct StateSwipeActions: ViewModifier {
 }
 
 struct IssueRow: View {
+    /// A step above body, so titles lead over the caption-sized details; pending rows use it too.
+    static let titleFont = Font.title3.weight(.medium)
+    /// One column for every row's leading symbol, so titles share an edge whatever the symbol.
+    static let iconWidth: CGFloat = 16
+
     let issue: Issue
     var isBusy = false
+    /// Off while the list is filtered to one repo, where every row would repeat it.
+    var showsRepo = true
     var showsDisclosure = false
 
     var body: some View {
@@ -341,7 +342,7 @@ struct IssueRow: View {
                     .accessibilityHidden(true)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
     }
 
@@ -350,23 +351,27 @@ struct IssueRow: View {
             let badge = issue.stateBadge
             // Pulses while a close, reopen or merge runs, without changing the row's layout.
             Image(systemName: badge.symbol)
+                .font(Self.titleFont)
+                .frame(width: Self.iconWidth)
                 .foregroundStyle(badge.color)
                 .symbolEffect(.pulse, options: .repeat(.continuous), isActive: isBusy)
                 .contentTransition(.symbolEffect(.replace))
                 .help(badge.title)
                 .accessibilityLabel(badge.title)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(issue.title)
-                    .font(.body.weight(.medium))
+                    .font(Self.titleFont)
                     .lineLimit(2)
                 HStack(spacing: 6) {
-                    Text("\(issue.repo) #\(issue.number)")
+                    Text(showsRepo ? "\(issue.repo) #\(issue.number)" : "#\(issue.number)")
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Text("·")
                         .accessibilityHidden(true)
                     Text(issue.updatedAt, format: .relative(presentation: .named))
                         .lineLimit(1)
+                    // At the trailing edge, so the count lines up from row to row.
+                    Spacer(minLength: 8)
                     if issue.commentsCount > 0 {
                         Label("\(issue.commentsCount)", systemImage: "bubble.left")
                             .labelStyle(.titleAndIcon)
@@ -376,26 +381,33 @@ struct IssueRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 if !issue.labels.isEmpty {
+                    // Set a little apart, so the details line reads as part of the title.
                     LabelChips(labels: issue.labels)
+                        .padding(.top, 4)
                 }
             }
         }
     }
 }
 
+/// Labels as quiet tinted capsules with a thin border, so they don't outshine the titles.
 struct LabelChips: View {
     let labels: [Issue.IssueLabel]
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(labels) { label in
+                // The border uses the text's shade, so pale labels still get a visible edge on white.
+                let textColor = Color.labelText(hex: label.color, in: colorScheme)
                 Text(label.name)
                     .font(.caption2.weight(.medium))
                     .lineLimit(1)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1)
-                    .background(Color(hex: label.color), in: .capsule)
-                    .foregroundStyle(Color.labelText(onHex: label.color))
+                    .background(Color(hex: label.color).opacity(0.1), in: .capsule)
+                    .overlay { Capsule().strokeBorder(textColor.opacity(0.3), lineWidth: 1) }
+                    .foregroundStyle(textColor)
             }
         }
         .accessibilityElement(children: .combine)

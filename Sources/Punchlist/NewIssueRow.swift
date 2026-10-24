@@ -7,21 +7,41 @@ struct NewIssueRow: View {
     @AppStorage("newIssueRepository") private var lastRepository = ""
     @State private var title = ""
     @FocusState private var isFocused: Bool
+    private static let fieldInset: CGFloat = 12
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Image(systemName: "plus.circle.fill")
-                    .foregroundStyle(.tint)
-                TextField("New issue title", text: $title)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($isFocused)
-                    .onSubmit(create)
-            }
-            // On its own line so the field keeps its width in a narrow sidebar.
+        VStack(alignment: .leading, spacing: 6) {
+            // A glass capsule like the toolbar's search field, rather than a bezeled box.
+            TextField("New issue title", text: $title, prompt: Text(""))
+                .textFieldStyle(.plain)
+                .focused($isFocused)
+                .onSubmit(create)
+                // Drawn here rather than as the prompt: on the sidebar's glass the field's own
+                // placeholder is as bright as typed text.
+                .background(alignment: .leading) {
+                    if title.isEmpty {
+                        Text("New issue")
+                            .foregroundStyle(.secondary)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .padding(.horizontal, Self.fieldInset)
+                .frame(height: FilterBar.height)
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .overlay {
+                    // Plain fields draw no focus ring, so the capsule shows focus itself.
+                    Capsule()
+                        .strokeBorder(.tint, lineWidth: 2)
+                        .opacity(isFocused ? 0.6 : 0)
+                }
+                .animation(.easeOut(duration: 0.15), value: isFocused)
+            // On its own line so the field keeps its width in a narrow sidebar; lined up with its text.
             repositoryMenu
-                .padding(.leading, 26)
+                .padding(.leading, Self.fieldInset)
         }
+        // List rows are inset 4pt more than the filter bar above; this lines the capsules up.
+        .padding(.horizontal, -4)
         .padding(.vertical, 4)
         // Runs on appear too, so File > New Issue works even when it had to switch tabs first.
         .task(id: store.wantsNewIssueFocus) {
@@ -44,12 +64,22 @@ struct NewIssueRow: View {
                 Button(repo) { lastRepository = repo }
             }
         } label: {
-            Text("in \(repository ?? "…")")
-                .lineLimit(1)
-                .truncationMode(.middle)
+            HStack(spacing: 3) {
+                Text("in \(repository ?? "…")")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.down")
+                    .imageScale(.small)
+                    .fontWeight(.semibold)
+            }
+            .font(.callout)
+            .contentShape(.rect)
         }
-        .menuStyle(.borderlessButton)
-        .controlSize(.small)
+        // A plain button, so SwiftUI draws the label: the AppKit pull-down styles draw their arrow
+        // black in the sidebar list, even in dark mode, and ignore the secondary color.
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .foregroundStyle(.secondary)
         .disabled(store.repoFilter != nil)
         .help(store.repoFilter != nil ? "Uses the repo filter" : "Repository for the new issue")
@@ -73,19 +103,25 @@ struct PendingIssueRow: View {
             let isSaving = pending.errorMessage == nil
             // Pulses like a row whose state is changing, without changing the row's layout.
             Image(systemName: isSaving ? "circle.circle" : "exclamationmark.triangle.fill")
+                .font(IssueRow.titleFont)
+                .frame(width: IssueRow.iconWidth)
                 .foregroundStyle(isSaving ? Color.secondary : Color.red)
                 .symbolEffect(.pulse, options: .repeat(.continuous), isActive: isSaving)
                 .accessibilityLabel(isSaving ? "Saving" : "Couldn't save")
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(pending.title)
-                    .font(.body.weight(.medium))
+                    .font(IssueRow.titleFont)
                     .lineLimit(2)
                     .foregroundStyle(isSaving ? .secondary : .primary)
-                Text(isSaving ? "\(pending.repo) · Saving…" : pending.repo)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                // The repo is left out while the list shows only that one, like the issue rows.
+                let repo = store.repoFilter == nil ? pending.repo : nil
+                if let details = isSaving ? [repo, "Saving…"].compactMap(\.self).joined(separator: " · ") : repo {
+                    Text(details)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
                 if let errorMessage = pending.errorMessage {
                     Text(errorMessage)
                         .font(.caption)
@@ -99,6 +135,6 @@ struct PendingIssueRow: View {
                 }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
     }
 }
