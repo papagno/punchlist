@@ -19,6 +19,14 @@ enum ItemKind: String, CaseIterable, Identifiable {
         case .pullRequests: "pull requests"
         }
     }
+
+    /// The same symbols as the open state badges in the list.
+    var symbol: String {
+        switch self {
+        case .issues: "circle.circle"
+        case .pullRequests: "arrow.triangle.pull"
+        }
+    }
 }
 
 enum IssueState: String, CaseIterable, Identifiable {
@@ -182,10 +190,15 @@ extension Color {
         )
     }
 
-    static func labelText(onHex hex: String) -> Color {
-        let value = UInt64(hex, radix: 16) ?? 0x888888
-        let r = Double((value >> 16) & 0xFF), g = Double((value >> 8) & 0xFF), b = Double(value & 0xFF)
-        let luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-        return luminance > 0.6 ? .black : .white
+    /// The label's own hue, lightened on dark backgrounds and darkened on light ones so it stays
+    /// readable on a faint tint of itself: pale labels like a2eeef would vanish on white otherwise.
+    static func labelText(hex: String, in colorScheme: ColorScheme) -> Color {
+        let color = NSColor(Color(hex: hex)).usingColorSpace(.sRGB) ?? .gray
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0
+        color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: nil)
+        return colorScheme == .dark
+            ? Color(hue: hue, saturation: min(saturation, 0.45), brightness: max(brightness, 0.8))
+            // Grays have no hue to saturate; anything else gets enough color to read as its label.
+            : Color(hue: hue, saturation: saturation < 0.1 ? saturation : max(saturation, 0.5), brightness: min(brightness, 0.58))
     }
 }

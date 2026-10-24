@@ -1,19 +1,42 @@
 import SwiftUI
 
-/// Repo, status and label filters as compact pull-down buttons, sized to fit the list column.
-/// Search itself is in the toolbar; these narrow what the list shows.
+/// The issues / pull requests switch and the repo, status and label filters, as two glass sections
+/// sized to fit the list column. Search itself is in the toolbar; the filters narrow what the list shows.
 struct FilterBar: View {
+    /// Shared with the new issue field below, so the bar and the field read as one set.
+    static let height: CGFloat = 30
+
     @Environment(IssuesStore.self) private var store
 
     var body: some View {
+        // One container so the two sections' glass blends where they meet, like toolbar groups.
+        GlassEffectContainer(spacing: 8) {
+            HStack(spacing: 8) {
+                KindSwitch()
+                    .frame(maxHeight: .infinity)
+                    .glassEffect(.regular, in: .capsule)
+                filters
+                    .frame(maxHeight: .infinity)
+                    .glassEffect(.regular, in: .capsule)
+            }
+            .frame(height: Self.height)
+        }
+    }
+
+    private var filters: some View {
         HStack(spacing: 6) {
             repoMenu
             statusMenu.fixedSize()
-            labelMenu.fixedSize()
+            // "Labels" keeps its width; a selected label's name truncates rather than squeezing
+            // the repo menu away.
+            labelMenu.fixedSize(horizontal: store.labelFilter.isEmpty, vertical: false)
             Spacer(minLength: 0)
             moreMenu.fixedSize()
         }
-        .controlSize(.small)
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
+        .menuIndicator(.visible)
+        .padding(.horizontal, 10)
     }
 
     private var repoMenu: some View {
@@ -78,6 +101,8 @@ struct FilterBar: View {
             }
         } label: {
             Text(labelMenuTitle)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .help("Filter by label")
     }
@@ -90,8 +115,7 @@ struct FilterBar: View {
             Button("Clear Filters") { store.clearLocalFilters() }
                 .disabled(!store.hasLocalFilters)
         } label: {
-            // A text title, not a symbol: an icon-only pull-down gets a smaller bezel than its
-            // text-titled neighbors, and symbols inside Text aren't drawn in a pull-down's title.
+            // A text title, not a symbol: symbols inside Text aren't drawn in a pull-down's title.
             Text("⋯")
                 .accessibilityLabel("More Filters")
         }
@@ -110,5 +134,46 @@ struct FilterBar: View {
     /// "owner/name" → "name"; the menu itself shows the full name.
     private static func shortName(_ repo: String) -> String {
         repo.split(separator: "/").last.map(String.init) ?? repo
+    }
+}
+
+/// Two icon buttons with a capsule that slides to the selected one, concentric with the glass
+/// around it; a segmented picker's rounded rectangle doesn't fit inside a capsule.
+private struct KindSwitch: View {
+    @Environment(IssuesStore.self) private var store
+    @Environment(\.appearsActive) private var appearsActive
+    @Namespace private var selection
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(ItemKind.allCases) { kind in
+                let isSelected = store.kind == kind
+                Button {
+                    store.kind = kind
+                } label: {
+                    Image(systemName: kind.symbol)
+                        .frame(width: 32)
+                        .frame(maxHeight: .infinity)
+                        .foregroundStyle(isSelected && appearsActive ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                        .background {
+                            if isSelected {
+                                Capsule()
+                                    .fill(appearsActive ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
+                                    .matchedGeometryEffect(id: "selection", in: selection)
+                            }
+                        }
+                        .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .help(kind.rawValue)
+                .accessibilityLabel(kind.rawValue)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        // Only the capsule slides; the list switches instantly, also from the menu bar.
+        .animation(.snappy(duration: 0.25), value: store.kind)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Show")
     }
 }
