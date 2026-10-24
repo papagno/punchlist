@@ -39,6 +39,15 @@ struct NewIssueRow: View {
                         .opacity(isFocused ? 0.6 : 0)
                 }
                 .animation(.easeOut(duration: 0.15), value: isFocused)
+                // In a List the field's editor fills its frame with the text background while
+                // editing, a rectangle inside the capsule; the glass is the background instead.
+                .onChange(of: isFocused) { _, isFocused in
+                    guard isFocused else { return }
+                    // Once SwiftUI has made the field first responder.
+                    DispatchQueue.main.async {
+                        (NSApp.keyWindow?.firstResponder as? NSTextView)?.drawsBackground = false
+                    }
+                }
             // On its own line so the field keeps its width in a narrow sidebar; lined up with its text.
             repositoryMenu
                 .padding(.leading, Self.fieldInset)
